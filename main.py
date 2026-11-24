@@ -37,8 +37,8 @@ LEAD = {
     "color": (31, 58, 95),
     "headline": "RUSSIAN STRIKES KILL AT LEAST 14 NEAR KYIV",
     "summary": (
-        "A FIVE-STOREY HOME COLLAPSED IN DYMER. ZELENSKYY WARNS OF "
-        "MORE STRIKES; MOSCOW SIGNALS NEW TALKS."
+        "A FIVE-STOREY HOME COLLAPSED IN DYMER. RESCUERS KEPT "
+        "DIGGING AS THE TOLL ROSE."
     ),
     "scene": "kyiv",
 }
@@ -49,8 +49,7 @@ STORIES = [
         "color": (13, 110, 78),
         "headline": "NVIDIA REINSTATES HUANG AS CEO",
         "summary": (
-            "HUANG RETURNS 11 DAYS AFTER QUITTING, UNDER TRUMP "
-            "PRESSURE. SHARES LEAPT 31%."
+            "HUANG RETURNS UNDER TRUMP PRESSURE. SHARES LEAPT 31%."
         ),
         "scene": "chip",
     },
@@ -77,18 +76,17 @@ STORIES = [
     {
         "tag": "ASIA - INDONESIA",
         "color": (178, 84, 22),
-        "headline": "FACTORY FIRE KILLS AT LEAST 24",
+        "headline": "FACTORY FIRE KILLS AT LEAST 26",
         "summary": (
-            "MORE BODIES WERE RECOVERED FROM THE BANTEN CANDY "
-            "FACTORY AS RESCUE WENT ON."
+            "THE TOLL ROSE IN THE BANTEN CANDY FACTORY. EIGHT "
+            "STILL MISSING."
         ),
         "scene": "factory",
     },
 ]
 
 TICKER = (
-    "ALSO TODAY: US STATES SUE MUSK'S FIRMS OVER SEXUALISED IMAGES "
-    "MADE BY THE GROK AI"
+    "ALSO TODAY: OREGON AND VIRGINIA SUE SPACEX OVER GROK AI IMAGES"
 )
 
 # =====================================================================
