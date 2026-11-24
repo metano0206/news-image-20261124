@@ -7,15 +7,18 @@ $MAKEFUN_OUTPUT_DIR/entry.png (or /output/entry.png when the variable is
 unset).  Python 3.13 standard library only; no network, no clock, no
 randomness: two runs write byte-identical files.
 
-The picture is drawn from scratch: a tiny 5x7 bitmap font, scanline
-shapes and simple scenes, rendered at twice the final size and averaged
-down for smooth edges, then encoded as a PNG with zlib.
+The picture is drawn from scratch: a hand-authored vector stroke font
+(each glyph a set of polylines, stroked with round joins and
+distance-based anti-aliasing), scanline shapes and simple scenes,
+rendered at twice the final size and averaged down, then encoded as a
+PNG with zlib.
 
 To refresh the entry for the finished day, edit only the NEWS DATA block
 below: the date line and the six stories (tag, headline, summary, scene).
 Everything else is the press that prints them.
 """
 
+import math
 import os
 import struct
 import zlib
@@ -23,8 +26,7 @@ import zlib
 # =====================================================================
 # NEWS DATA -- the whole day lives in this block, and nowhere else.
 # Swap these values in one edit to update the picture; the layout code
-# below never changes.  Text is upper case because the built-in font
-# is a capitals face, like a newspaper poster.
+# below never changes.  Text is upper case, like a newspaper poster.
 # =====================================================================
 
 DAY_NAME = "TUESDAY"
@@ -90,74 +92,133 @@ TICKER = (
 )
 
 # =====================================================================
-# THE FONT -- a 5x7 capitals face, one string of seven rows per glyph,
-# '#' for ink and '.' for paper.  Authored for this program.
+# THE FONT -- a vector stroke face, authored for this program.
+# Each glyph is (width, [stroke, ...]) in font units: x grows right,
+# y grows down, cap height is 10 units (y=0 is the cap line, y=10 the
+# baseline).  A stroke is a polyline; curves are ellipse arcs expanded
+# by arc().  Strokes are drawn with round caps and joins, so a lone
+# point renders as a round dot.
 # =====================================================================
 
-FONT = {
-    "A": (".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
-    "B": ("####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."),
-    "C": (".###.", "#...#", "#....", "#....", "#....", "#...#", ".###."),
-    "D": ("###..", "#..#.", "#...#", "#...#", "#...#", "#..#.", "###.."),
-    "E": ("#####", "#....", "#....", "####.", "#....", "#....", "#####"),
-    "F": ("#####", "#....", "#....", "####.", "#....", "#....", "#...."),
-    "G": (".###.", "#...#", "#....", "#.###", "#...#", "#...#", ".####"),
-    "H": ("#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
-    "I": (".###.", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."),
-    "J": ("..###", "...#.", "...#.", "...#.", "...#.", "#..#.", ".##.."),
-    "K": ("#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"),
-    "L": ("#....", "#....", "#....", "#....", "#....", "#....", "#####"),
-    "M": ("#...#", "##.##", "#.#.#", "#.#.#", "#...#", "#...#", "#...#"),
-    "N": ("#...#", "#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#"),
-    "O": (".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
-    "P": ("####.", "#...#", "#...#", "####.", "#....", "#....", "#...."),
-    "Q": (".###.", "#...#", "#...#", "#...#", "#.#.#", "#..#.", ".##.#"),
-    "R": ("####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"),
-    "S": (".####", "#....", "#....", ".###.", "....#", "....#", "####."),
-    "T": ("#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."),
-    "U": ("#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
-    "V": ("#...#", "#...#", "#...#", "#...#", "#...#", ".#.#.", "..#.."),
-    "W": ("#...#", "#...#", "#...#", "#.#.#", "#.#.#", "#.#.#", ".#.#."),
-    "X": ("#...#", "#...#", ".#.#.", "..#..", ".#.#.", "#...#", "#...#"),
-    "Y": ("#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."),
-    "Z": ("#####", "....#", "...#.", "..#..", ".#...", "#....", "#####"),
-    "0": (".###.", "#..##", "#.#.#", "##..#", "#...#", "#...#", ".###."),
-    "1": ("..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."),
-    "2": (".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"),
-    "3": ("#####", "...#.", "..#..", "...#.", "....#", "#...#", ".###."),
-    "4": ("...#.", "..##.", ".#.#.", "#..#.", "#####", "...#.", "...#."),
-    "5": ("#####", "#....", "####.", "....#", "....#", "#...#", ".###."),
-    "6": (".##..", ".#...", "#....", "####.", "#...#", "#...#", ".###."),
-    "7": ("#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."),
-    "8": (".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."),
-    "9": (".###.", "#...#", "#...#", ".####", "....#", "...#.", ".##.."),
-    " ": (".....", ".....", ".....", ".....", ".....", ".....", "....."),
-    ".": (".....", ".....", ".....", ".....", ".....", ".##..", ".##.."),
-    ",": (".....", ".....", ".....", ".....", ".##..", "..#..", ".#..."),
-    "'": ("..#..", "..#..", ".#...", ".....", ".....", ".....", "....."),
-    ":": (".....", ".##..", ".##..", ".....", ".##..", ".##..", "....."),
-    ";": (".....", ".##..", ".##..", ".....", ".##..", "..#..", ".#..."),
-    "!": ("..#..", "..#..", "..#..", "..#..", "..#..", ".....", "..#.."),
-    "?": (".###.", "#...#", "....#", "...##", "..#..", ".....", "..#.."),
-    "-": (".....", ".....", ".....", ".###.", ".....", ".....", "....."),
-    "(": ("...#.", "..#..", ".#...", ".#...", ".#...", "..#..", "...#."),
-    ")": (".#...", "..#..", "...#.", "...#.", "...#.", "..#..", ".#..."),
-    "/": ("....#", "...#.", "...#.", "..#..", ".#...", ".#...", "#...."),
-    "%": ("##..#", "##.#.", "....#", "...#.", "..#..", ".#.##", "#..##"),
-    "$": ("..#..", ".####", "#.#..", ".###.", "..#.#", "####.", "..#.."),
-    "&": (".##..", "#..#.", "#.#..", "..#..", "#.#.#", "#..#.", ".#.#."),
-    "+": (".....", "..#..", "..#..", ".###.", "..#..", "..#..", "....."),
-    "*": (".....", "#.#.#", ".###.", "#.#.#", ".....", ".....", "....."),
+
+def arc(cx, cy, rx, ry, a0, a1, steps=12):
+    """Points along an ellipse, angles in degrees, y axis pointing
+    down (so increasing angles sweep clockwise on the page)."""
+    pts = []
+    for i in range(steps + 1):
+        a = math.radians(a0 + (a1 - a0) * i / steps)
+        pts.append((cx + rx * math.cos(a), cy + ry * math.sin(a)))
+    return pts
+
+
+GLYPHS = {
+    "A": (7.4, [[(0.3, 10), (3.7, 0), (7.1, 10)],
+                [(1.5, 6.4), (5.9, 6.4)]]),
+    "B": (7.2, [[(0, 0), (0, 10)],
+                [(0, 0), (3.6, 0)] + arc(3.6, 2.5, 2.3, 2.5, -90, 90, 8)
+                + [(0, 5)],
+                [(0, 5), (4.2, 5)] + arc(4.2, 7.5, 2.7, 2.5, -90, 90, 8)
+                + [(0, 10)]]),
+    "C": (7.6, [arc(3.9, 5, 3.6, 5, -52, -308, 18)]),
+    "D": (7.4, [[(0, 0), (0, 10)],
+                [(0, 0), (3.3, 0)] + arc(3.3, 5, 3.5, 5, -90, 90, 12)
+                + [(0, 10)]]),
+    "E": (6.4, [[(6.4, 0), (0, 0), (0, 10), (6.4, 10)],
+                [(0, 5), (5.2, 5)]]),
+    "F": (6.2, [[(6.2, 0), (0, 0), (0, 10)],
+                [(0, 5), (5.0, 5)]]),
+    "G": (7.8, [arc(3.9, 5, 3.6, 5, -52, -325, 18)
+                + [(6.85, 5.4), (4.3, 5.4)]]),
+    "H": (7.4, [[(0, 0), (0, 10)], [(7.4, 0), (7.4, 10)],
+                [(0, 5), (7.4, 5)]]),
+    "I": (3.4, [[(0, 0), (3.4, 0)], [(1.7, 0), (1.7, 10)],
+                [(0, 10), (3.4, 10)]]),
+    "J": (6.4, [[(6.2, 0), (6.2, 6.6)]
+                + arc(4.2, 6.6, 2.0, 3.4, 0, 90, 8) + [(0.9, 10)]]),
+    "K": (7.2, [[(0, 0), (0, 10)], [(6.9, 0), (0.7, 5.4)],
+                [(1.9, 4.3), (7.1, 10)]]),
+    "L": (6.2, [[(0, 0), (0, 10), (6.2, 10)]]),
+    "M": (8.8, [[(0, 10), (0, 0), (4.4, 6.4), (8.8, 0), (8.8, 10)]]),
+    "N": (7.6, [[(0, 10), (0, 0), (7.6, 10), (7.6, 0)]]),
+    "O": (7.8, [arc(3.9, 5, 3.6, 5, -90, 270, 24)]),
+    "P": (6.8, [[(0, 10), (0, 0), (3.7, 0)]
+                + arc(3.7, 2.6, 2.7, 2.6, -90, 90, 10) + [(0, 5.2)]]),
+    "Q": (7.8, [arc(3.9, 5, 3.6, 5, -90, 270, 24),
+                [(4.5, 7.3), (7.7, 10.3)]]),
+    "R": (6.8, [[(0, 10), (0, 0), (3.7, 0)]
+                + arc(3.7, 2.6, 2.7, 2.6, -90, 90, 10) + [(0, 5.2)],
+                [(3.3, 5.2), (7.0, 10)]]),
+    "S": (6.8, [[(6.2, 1.9), (5.0, 0.5), (3.3, 0), (1.6, 0.6),
+                 (0.7, 1.9), (0.9, 3.3), (2.1, 4.3), (4.5, 5.6),
+                 (5.8, 6.7), (6.1, 8.1), (5.1, 9.4), (3.3, 10),
+                 (1.6, 9.5), (0.6, 8.3)]]),
+    "T": (7.0, [[(0, 0), (7, 0)], [(3.5, 0), (3.5, 10)]]),
+    "U": (7.4, [[(0, 0), (0, 6.6)]
+                + arc(3.7, 6.6, 3.7, 3.4, 180, 0, 12) + [(7.4, 0)]]),
+    "V": (7.4, [[(0, 0), (3.7, 10), (7.4, 0)]]),
+    "W": (10.2, [[(0, 0), (1.9, 10), (5.1, 3.6), (8.3, 10),
+                  (10.2, 0)]]),
+    "X": (7.2, [[(0, 0), (7.2, 10)], [(7.2, 0), (0, 10)]]),
+    "Y": (7.2, [[(0, 0), (3.6, 4.8), (7.2, 0)],
+                [(3.6, 4.8), (3.6, 10)]]),
+    "Z": (6.8, [[(0, 0), (6.8, 0), (0, 10), (6.8, 10)]]),
+    "0": (7.2, [arc(3.6, 5, 3.2, 5, -90, 270, 24)]),
+    "1": (5.4, [[(0.9, 2.0), (3.0, 0.1), (3.0, 10)],
+                [(0.8, 10), (5.2, 10)]]),
+    "2": (6.8, [[(0.9, 1.8), (1.8, 0.5), (3.6, 0), (5.4, 0.7),
+                 (6.1, 2.2), (5.4, 4.0), (3.4, 5.9), (0.8, 9.6),
+                 (0.8, 10), (6.6, 10)]]),
+    "3": (6.8, [[(0.8, 1.3), (2.2, 0.2), (4.0, 0), (5.6, 0.9),
+                 (5.9, 2.4), (5.1, 3.9), (3.8, 4.6), (5.2, 5.4),
+                 (6.1, 6.9), (5.9, 8.6), (4.6, 9.8), (2.6, 10),
+                 (1.0, 9.3), (0.6, 8.1)]]),
+    "4": (7.2, [[(4.8, 10), (4.8, 0), (0.6, 7.2), (7.2, 7.2)]]),
+    "5": (6.6, [[(6.2, 0), (1.0, 0), (0.8, 4.0), (2.4, 3.5),
+                 (4.4, 3.7), (5.8, 4.9), (6.0, 6.7), (5.1, 8.8),
+                 (3.3, 10), (1.4, 9.6), (0.5, 8.3)]]),
+    "6": (6.8, [[(5.8, 1.3), (4.2, 0.3), (2.4, 0.9), (1.2, 2.8),
+                 (0.7, 5.2), (0.8, 7.4), (1.8, 9.3), (3.4, 10),
+                 (5.0, 9.4), (6.1, 7.8), (6.0, 6.0), (4.9, 4.7),
+                 (3.2, 4.5), (1.7, 5.2)]]),
+    "7": (6.6, [[(0.4, 0), (6.6, 0), (3.2, 10)]]),
+    "8": (6.8, [arc(3.4, 2.5, 2.3, 2.5, -90, 270, 18),
+                arc(3.4, 7.3, 2.9, 2.7, -90, 270, 20)]),
+    "9": (6.8, [arc(3.4, 3.1, 2.9, 3.1, -90, 270, 20),
+                [(6.3, 3.1), (6.1, 6.2), (4.9, 8.9), (3.0, 10),
+                 (1.2, 9.3)]]),
+    " ": (3.6, []),
+    ".": (2.6, [[(1.3, 9.1), (1.3, 9.1)]]),
+    ",": (2.6, [[(1.4, 8.3), (1.4, 8.3)], [(1.5, 8.6), (0.9, 10.7)]]),
+    "'": (2.4, [[(1.3, 0), (1.0, 2.3)]]),
+    ":": (2.6, [[(1.3, 3.0), (1.3, 3.0)], [(1.3, 8.9), (1.3, 8.9)]]),
+    ";": (2.6, [[(1.3, 3.0), (1.3, 3.0)], [(1.4, 8.3), (1.4, 8.3)],
+                [(1.5, 8.6), (0.9, 10.7)]]),
+    "!": (2.6, [[(1.3, 0), (1.3, 6.7)], [(1.3, 9.1), (1.3, 9.1)]]),
+    "?": (6.4, [[(1.0, 1.7), (1.9, 0.4), (3.5, 0), (5.0, 0.7),
+                 (5.5, 2.2), (4.7, 3.9), (3.4, 5.0), (3.4, 6.7)],
+                [(3.4, 9.1), (3.4, 9.1)]]),
+    "-": (4.8, [[(0.6, 5), (4.2, 5)]]),
+    "(": (4.0, [arc(2.8, 5, 2.6, 5.2, -70, -290, 14)]),
+    ")": (4.0, [arc(1.2, 5, 2.6, 5.2, -110, 110, 14)]),
+    "/": (5.6, [[(0.6, 10), (5.0, 0)]]),
+    "%": (7.4, [arc(1.9, 1.9, 1.6, 1.6, -90, 270, 12),
+                arc(5.5, 8.1, 1.6, 1.6, -90, 270, 12),
+                [(6.8, 0), (0.6, 10)]]),
+    "$": (6.8, [[(5.9, 1.7), (4.7, 0.4), (3.1, 0), (1.5, 0.6),
+                 (0.8, 1.8), (1.6, 3.1), (4.3, 4.6), (5.5, 5.9),
+                 (5.3, 7.9), (4.0, 9.6), (2.2, 10), (0.9, 8.9)],
+                [(3.3, -0.7), (3.3, 10.7)]]),
+    "&": (7.4, [[(5.9, 0.9), (4.6, 0.1), (3.0, 0.5), (2.2, 1.9),
+                 (2.6, 3.3), (3.8, 4.6), (6.3, 8.0), (7.0, 9.3)],
+                [(6.3, 8.0), (4.4, 9.7), (2.4, 10), (1.0, 8.9),
+                 (0.9, 7.0), (1.9, 5.4), (3.8, 4.6)]]),
+    "+": (6.0, [[(3.0, 2.2), (3.0, 7.8)], [(0.6, 5), (5.4, 5)]]),
+    "*": (6.0, [[(3.0, 1.4), (3.0, 6.2)], [(1.1, 2.4), (4.9, 5.2)],
+                [(4.9, 2.4), (1.1, 5.2)]]),
 }
 
-GLYPH_W = 5
-GLYPH_H = 7
-
-
-def advance(scale):
-    """Horizontal pen step per character: the glyph's own width plus a
-    little tracking, tighter than a full blank column."""
-    return GLYPH_W * scale + max(1, scale // 2)
+TRACK = 1.7        # font units of space after each glyph
+STROKE_FRAC = 0.13  # stroke width as a fraction of the cap height
 
 # =====================================================================
 # THE PRESS -- a small software printing press.
@@ -241,36 +302,119 @@ def fill_poly(points, color):
 
 def stroke_circle(cx, cy, r, color, width=2.0):
     """Ring drawn as many small dots along the circumference."""
-    import math
-
     steps = max(24, int(2 * math.pi * r * SS / 2))
     for i in range(steps):
         a = 2 * math.pi * i / steps
         fill_circle(cx + r * math.cos(a), cy + r * math.sin(a), width, color)
 
 
+# ---------------------------------------------------------------------
+# TEXT -- stroke glyphs are rasterised once per (character, size,
+# weight) into a coverage mask: for every buffer pixel near the
+# strokes, how much of it the ink covers, from the pixel centre's
+# distance to the nearest segment.  Drawing text then blends those
+# masks into the buffer, which keeps the letterforms smooth at any
+# size.
+# ---------------------------------------------------------------------
+
+_MASKS = {}
+
+
+def _unit(scale):
+    """Final-image pixels per font unit.  The cap height is 10 units
+    and equals 7 * scale pixels, matching the layout's line boxes."""
+    return 0.7 * scale
+
+
+def _seg_dist(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _glyph_mask(ch, scale, weight):
+    """Coverage mask for one glyph: a tuple of (dx, dy, coverage) in
+    buffer pixels, relative to the glyph's origin (pen position at
+    the cap line)."""
+    key = (ch, scale, weight)
+    hit = _MASKS.get(key)
+    if hit is not None:
+        return hit
+    _, strokes = GLYPHS.get(ch, GLYPHS[" "])
+    u = _unit(scale) * SS
+    half = max(0.6, 0.5 * STROKE_FRAC * 7 * scale * SS * weight)
+    segs = []
+    for stroke in strokes:
+        pts = [(px * u, py * u) for px, py in stroke]
+        if len(pts) == 1:
+            segs.append((pts[0], pts[0]))
+        for a, b in zip(pts, pts[1:]):
+            segs.append((a, b))
+    if not segs:
+        _MASKS[key] = ()
+        return ()
+    xs = [p[0] for s in segs for p in s]
+    ys = [p[1] for s in segs for p in s]
+    x0 = int(math.floor(min(xs) - half - 1))
+    x1 = int(math.ceil(max(xs) + half + 1))
+    y0 = int(math.floor(min(ys) - half - 1))
+    y1 = int(math.ceil(max(ys) + half + 1))
+    items = []
+    for yy in range(y0, y1 + 1):
+        for xx in range(x0, x1 + 1):
+            cx, cy = xx + 0.5, yy + 0.5
+            d = min(_seg_dist(cx, cy, a[0], a[1], b[0], b[1])
+                    for a, b in segs)
+            cov = half + 0.5 - d
+            if cov > 0:
+                items.append((xx, yy, 1.0 if cov >= 1.0 else cov))
+    mask = tuple(items)
+    _MASKS[key] = mask
+    return mask
+
+
+def _blit(ox, oy, mask, color):
+    """Blend a coverage mask into the buffer at final-image (ox, oy)."""
+    bx = int(round(ox * SS))
+    by = int(round(oy * SS))
+    r, g, b = color
+    for dx, dy, cov in mask:
+        xx, yy = bx + dx, by + dy
+        if 0 <= xx < W and 0 <= yy < H:
+            i = (yy * W + xx) * 3
+            inv = 1.0 - cov
+            buf[i] = int(r * cov + buf[i] * inv + 0.5)
+            buf[i + 1] = int(g * cov + buf[i + 1] * inv + 0.5)
+            buf[i + 2] = int(b * cov + buf[i + 2] * inv + 0.5)
+
+
 def text_width(text, scale):
+    text = text.upper()
     if not text:
-        return 0
-    return (len(text) - 1) * advance(scale) + GLYPH_W * scale
+        return 0.0
+    units = sum(GLYPHS.get(ch, GLYPHS[" "])[0] for ch in text)
+    units += TRACK * (len(text) - 1)
+    return units * _unit(scale)
 
 
-def draw_text(x, y, text, scale, color, align="left"):
-    """Draw one line of capitals; (x, y) is the top-left of the line,
-    or its centre when align='center'.  Returns the line's width."""
+def draw_text(x, y, text, scale, color, align="left", weight=1.0):
+    """Draw one line of capitals; (x, y) is the top-left of the line
+    (the cap line), or its centre when align='center'.  Returns the
+    line's width.  weight multiplies the stroke width."""
     text = text.upper()
     w = text_width(text, scale)
     if align == "center":
-        x = x - w // 2
+        x = x - w / 2
     pen = x
+    u = _unit(scale)
     for ch in text:
-        glyph = FONT.get(ch, FONT[" "])
-        for row_i, row in enumerate(glyph):
-            for col_i, cell in enumerate(row):
-                if cell == "#":
-                    fill_rect(pen + col_i * scale, y + row_i * scale,
-                              scale, scale, color)
-        pen += advance(scale)
+        gw = GLYPHS.get(ch, GLYPHS[" "])[0]
+        if ch != " ":
+            _blit(pen, y, _glyph_mask(ch, scale, weight), color)
+        pen += (gw + TRACK) * u
     return w
 
 
@@ -291,12 +435,13 @@ def wrap(text, scale, max_width):
     return lines
 
 
-def draw_text_block(x, y, text, scale, color, max_width, leading=None):
+def draw_text_block(x, y, text, scale, color, max_width, leading=None,
+                    weight=1.0):
     """Wrapped paragraph; returns the y just below the last line."""
     if leading is None:
-        leading = int(GLYPH_H * scale * 1.45)
+        leading = int(7 * scale * 1.45)
     for line in wrap(text, scale, max_width):
-        draw_text(x, y, line, scale, color)
+        draw_text(x, y, line, scale, color, weight=weight)
         y += leading
     return y
 
@@ -318,8 +463,6 @@ def scene_kyiv(x, y, w, h):
     # Burst of light over the skyline.
     cx, cy = x + w * 0.46, y + h * 0.52
     star = []
-    import math
-
     for i in range(16):
         ang = math.pi * i / 8
         rad = 30 if i % 2 == 0 else 12
@@ -360,7 +503,7 @@ def scene_chip(x, y, w, h):
     # Body and core.
     fill_rect(cx - 28, cy - 28, 56, 56, green)
     fill_rect(cx - 15, cy - 15, 30, 30, (9, 74, 52))
-    draw_text(cx, cy - 7, "AI", 2, WHITE, align="center")
+    draw_text(cx, cy - 7, "AI", 2, WHITE, align="center", weight=1.2)
 
 
 def scene_globe(x, y, w, h):
@@ -440,12 +583,15 @@ def rule(y, thickness=3, color=INK):
 
 
 def draw_masthead():
-    draw_text(FINAL_W // 2, 22, KICKER, 3, RED, align="center")
-    draw_text(FINAL_W // 2, 48, DAY_NAME, 4, INK, align="center")
-    draw_text(FINAL_W // 2, 82, DATE_LINE, 9, INK, align="center")
-    rule(156, 5)
-    rule(164, 2)
-    draw_text(FINAL_W // 2, 172, SOURCE_LINE, 2, GREY, align="center")
+    draw_text(FINAL_W // 2, 18, KICKER, 3, RED, align="center",
+              weight=1.1)
+    draw_text(FINAL_W // 2, 48, DAY_NAME, 4, INK, align="center",
+              weight=1.15)
+    draw_text(FINAL_W // 2, 90, DATE_LINE, 8, INK, align="center",
+              weight=1.4)
+    rule(160, 5)
+    rule(168, 2)
+    draw_text(FINAL_W // 2, 174, SOURCE_LINE, 2, GREY, align="center")
 
 
 def draw_lead(story):
@@ -461,10 +607,10 @@ def draw_lead(story):
     # Tag chip.
     chip_w = text_width(story["tag"], 3) + 20
     fill_rect(tx, y + 14, chip_w, 30, story["color"])
-    draw_text(tx + 10, y + 18, story["tag"], 3, WHITE)
+    draw_text(tx + 10, y + 18, story["tag"], 3, WHITE, weight=1.15)
     # Headline, then summary.
     hy = draw_text_block(tx, y + 58, story["headline"], 5, INK, tw,
-                         leading=46)
+                         leading=46, weight=1.25)
     draw_text_block(tx, hy + 6, story["summary"], 3, (52, 52, 66), tw,
                     leading=29)
 
@@ -477,11 +623,11 @@ def draw_panel(x, y, w, h, story):
     # Tag chip on the left; the story's scene at the top right.
     chip_w = text_width(story["tag"], 2) + 16
     fill_rect(x + pad, y + 12, chip_w, 24, story["color"])
-    draw_text(x + pad + 8, y + 17, story["tag"], 2, WHITE)
+    draw_text(x + pad + 8, y + 17, story["tag"], 2, WHITE, weight=1.15)
     SCENES[story["scene"]](x + w - pad - 88, y + 8, 88, 64)
     # Headline below the icon row, summary below the headline.
     hy = draw_text_block(x + pad, y + 84, story["headline"], 4, INK,
-                         w - 2 * pad, leading=36)
+                         w - 2 * pad, leading=36, weight=1.2)
     draw_text_block(x + pad, hy + 6, story["summary"], 3, (52, 52, 66),
                     w - 2 * pad, leading=27)
 
@@ -489,7 +635,8 @@ def draw_panel(x, y, w, h, story):
 def draw_ticker():
     y = 984
     fill_rect(MARGIN, y, PAGE_W, 36, INK)
-    draw_text(FINAL_W // 2, y + 11, TICKER, 2, PAPER, align="center")
+    draw_text(FINAL_W // 2, y + 11, TICKER, 2, PAPER, align="center",
+              weight=1.1)
 
 
 def render():
